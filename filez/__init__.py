@@ -1,5 +1,8 @@
 from collections import OrderedDict
+from xml.etree import ElementTree
+from html.parser import HTMLParser
 
+SINGLE_TAGS = ['br','hr','img','input','param','meta','link']
 
 def trans_value(value, ensure_number=True, ensure_boolean=True):
     if ensure_boolean is True:
@@ -20,7 +23,6 @@ def trans_value(value, ensure_number=True, ensure_boolean=True):
                 pass
     return value
 
-
 def trans_dict_value(data, ensure_number=True, ensure_boolean=True, ordered_dict=False):
     data = {key: trans_value(value, ensure_number, ensure_boolean) for key, value in data.items()}
     if ordered_dict is True:
@@ -28,9 +30,59 @@ def trans_dict_value(data, ensure_number=True, ensure_boolean=True, ordered_dict
     return data
 
 
+def get_xml_children(node):
+    children = node.getchildren()
+    if children:
+        return [{'tag': node.tag,
+                 'attrs': node.attrib,
+                 'text': node.text.strip(),
+                 'children': get_xml_children(child)
+                 } for child in children]
+    else:
+        return {'tag': node.tag,
+                'attrs': node.attrib,
+                'text': node.text or None}
+
+
+class MyHTMLParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.stack = []
+        self.data = None
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+        if tag in SINGLE_TAGS:
+            return self.handle_startendtag(tag, attrs)
+        self.stack.append(dict(tag=tag, attrs=dict(attrs), children=[], text=''))
+
+    def handle_endtag(self, tag):
+        self.data = current = self.stack.pop()
+        if self.stack:
+            parent = self.stack[-1]
+            parent['children'].append(current)
+
+    def handle_startendtag(self, tag, attrs):
+        if self.stack:
+            parent = self.stack[-1]
+            parent['children'].append(dict(tag=tag, attrs=dict(attrs), children=[], text=''))
+
+    def handle_data(self, data):
+        if not data.strip():
+            return
+        if self.stack:
+            self.stack[-1]['text'] = data.strip()
+
+
 class Filez(object):
     def __init__(self):
         pass
+
+    def open(self, file_path, **kwargs):
+        encoding = kwargs.get('encoding', 'utf-8')
+        with open(file_path, encoding=encoding) as f:
+            raw = f.read()
+        return raw
 
     def load_txt(self, file_path, **kwargs):
         encoding = kwargs.get('encoding', 'utf-8')
@@ -121,6 +173,22 @@ class Filez(object):
             data = get_sh_data(sh, header)
         return data
 
+    def load_xml(self, file_path, **kwargs):
+        encoding = kwargs.get('encoding', 'utf-8')
+        with open(file_path, encoding=encoding) as f:
+            raw = f.read().strip()
+        root = ElementTree.fromstring(raw)
+        data = get_xml_children(root)
+        return data
+
+    def load_html(self, file_path, **kwargs):
+        parser = MyHTMLParser()
+        encoding = kwargs.get('encoding', 'utf-8')
+        with open(file_path, encoding=encoding) as f:
+            raw = f.read().strip()
+        parser.feed(raw)
+        return parser.data
+
     def load(self, file_path, **kwargs):  # todo file_type='config'
         if file_path.endswith('.csv'):
             return self.load_csv(file_path, **kwargs)
@@ -132,14 +200,13 @@ class Filez(object):
             return self.load_config(file_path, **kwargs)
         elif file_path.endswith('.xls') or file_path.endswith('.xls'):
             return self.load_excel(file_path, **kwargs)
+        elif file_path.endswith('.xml'):
+            return self.load_xml(file_path, **kwargs)
+        elif file_path.endswith('.html') or file_path.endswith('.htm'):
+            return self.load_html(file_path, **kwargs)
         else:
             return self.load_txt(file_path, **kwargs)
 
 
 file = Filez()
 
-
-if __name__ == '__main__':
-    from filez import file
-    data = file.load('tests/data.txt')
-    print(data)

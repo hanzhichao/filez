@@ -8,6 +8,7 @@ Easy use for fetch data from kinds of files
 - Strip lines for txt
 - Ensure_number and ensure_boolean for csv or conf
 - Load all sheets or given sheets of excel file
+- HTML/XML to Dict
 
 ## Install
 ```
@@ -24,6 +25,8 @@ data = file.load('tests/data.xlsx', header=True)
 data = file.load('tests/data.conf')
 data = file.load('tests/data.json'）
 data = file.load('tests/data.yaml'）
+data = file.load('tests/data.html')
+data = file.load('tests/xml.html')
 ```
 
 ## File type data type mapping
@@ -39,10 +42,9 @@ data = file.load('tests/data.yaml'）
         - no header: [[...], [...], [...]]  # ensure_number and ensure_boolean
         - with header: [OrderedDict([...]), OrderedDict([...]), OrderedDict([...])]
     - given sheets: {Sheet1: [], Sheet2: [],...}
-    
+- html/xml: {'tag': html, 'attrs': {}, 'text': '', children: [{'tag': 'head',...},{'tag': 'body',...}]}
+
 ## Todo
-- load_xml
-- load_html
 - load_xmind
 - load_doc
 - load_pdf
