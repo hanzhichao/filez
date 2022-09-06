@@ -248,8 +248,7 @@ class Filez(object):
         parser.feed(raw)
         return parser.data
 
-    @staticmethod
-    def load(file_path: Union[Path, str], **kwargs):  # todo file_type='config'
+    def load(self, file_path: Union[Path, str], **kwargs):  # todo file_type='config'
         file_path = str(file_path)
         if file_path.endswith('.csv'):
             return self.load_csv(file_path, **kwargs)
