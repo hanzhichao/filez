@@ -35,7 +35,7 @@ setup(
     packages=find_packages(include=['filez']),
     setup_requires=setup_requirements,
     url='https://github.com/hanzhichao/filez',
-    version='0.11',
+    version='0.12',
     zip_safe=True,
     install_requires=[]
 )

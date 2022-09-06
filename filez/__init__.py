@@ -1,6 +1,11 @@
 from collections import OrderedDict
 from xml.etree import ElementTree
 from html.parser import HTMLParser
+from configparser import ConfigParser
+from typing import Union
+from pathlib import Path
+from string import Template
+import os
 
 SINGLE_TAGS = ['br','hr','img','input','param','meta','link']
 
@@ -74,23 +79,77 @@ class MyHTMLParser(HTMLParser):
             self.stack[-1]['text'] = data.strip()
 
 
-class Filez(object):
-    def __init__(self):
-        pass
+class CaseSensitiveiniigParser(ConfigParser):
+    def optionxform(self, optionstr):
+        return optionstr
 
-    def open(self, file_path, **kwargs):
+    def ensure_value(self, value: str):
+        """转为value为各种类型"""
+        if value is None:
+            return value
+        # 转为整形
+        if value.isdigit():
+            return int(value)
+
+        # 转为True、False或None
+        if value.lower() in ['true', 'on']:
+            return True
+
+        if value.lower() in ['false', 'off']:
+            return False
+
+        if value.lower() in ['~', 'none', 'null']:
+            return None
+
+        # 尝试转为浮点型
+        try:
+            return float(value)
+        except:
+            pass
+
+        # 尝试解码JSON
+        json = __import__('json')
+        if value.lstrip().startswith('[') or value.lstrip().startswith('{'):
+            try:
+                return json.loads(value.replace("'", '"'))
+            except Exception as ex:
+                # print(ex)
+                pass
+        # 替换${变量}为系统环境变量值
+        if '$' in value:
+            return Template(value).safe_substitute(**dict(os.environ))
+
+        return value
+
+    def get(self, section, option, *args, **kwargs):
+        try:
+            value = super().get(section, option, *args, **kwargs)
+        except (configparser.NoSectionError, configparser.NoOptionError):
+            return None
+        return self.ensure_value(value)
+
+    def items(self, *args, **kwargs):
+        items = super().items(*args, **kwargs)
+        return [(item[0], self.ensure_value(item[1])) for item in items]
+
+class Filez(object):
+
+    @staticmethod
+    def open(file_path: Union[Path, str], **kwargs):
         encoding = kwargs.get('encoding', 'utf-8')
         with open(file_path, encoding=encoding) as f:
             raw = f.read()
         return raw
 
-    def load_txt(self, file_path, **kwargs):
+    @staticmethod
+    def load_txt(file_path: Union[Path, str], **kwargs):
         encoding = kwargs.get('encoding', 'utf-8')
         with open(file_path, encoding=encoding) as f:
             data = [line.strip() for line in f.readlines()]
         return data
 
-    def load_csv(self, file_path, **kwargs):
+    @staticmethod
+    def load_csv(file_path: Union[Path, str], **kwargs):
         csv = __import__('csv')
         encoding = kwargs.get('encoding', 'utf-8')
         header = kwargs.get('header', False)
@@ -112,37 +171,35 @@ class Filez(object):
                                                       line)), data))
         return data
 
-    def load_json(self, file_path, **kwargs):
+    @staticmethod
+    def load_json(file_path: Union[Path, str], **kwargs):
         json = __import__('json')
         encoding = kwargs.get('encoding', 'utf-8')
         with open(file_path, encoding=encoding) as f:
             data = json.load(f)
         return data
 
-    def load_yaml(self, file_path, **kwargs):
+    @staticmethod
+    def load_yaml(**kwargs):
         yaml = __import__('yaml')
         encoding = kwargs.get('encoding', 'utf-8')
         with open(file_path, encoding=encoding) as f:
             data = yaml.safe_load(f)
         return data
 
-    def load_config(self, file_path, **kwargs):  # todo case sensitive, sub section insure_boolean
+    @staticmethod
+    def load_ini(file_path: Union[Path, str], **kwargs):  # todo case sensitive, sub section insure_boolean
         configparser = __import__('configparser')
         encoding = kwargs.get('encoding', 'utf-8')
-        ensure_number = kwargs.get('ensure_number', True)
-        ensure_boolean = kwargs.get('ensure_boolean', True)
 
-        conf = configparser.ConfigParser()
+        conf = CaseSensitiveiniigParser(allow_no_value=True)
         conf.read(file_path, encoding=encoding)
 
-        if ensure_number or ensure_boolean:
-            data = {section: trans_dict_value(dict(conf.items(section)), ensure_number, ensure_boolean, ordered_dict=True)
-                    for section in conf.sections()}
-        else:
-            data = {section: dict(conf.items(section)) for section in conf.sections()}
+        data = {section: dict(conf.items(section)) for section in conf.sections()}
         return data
 
-    def load_excel(self, file_path, **kwargs):  # todo float->int ->str, FALSE -> False, '' -> None
+    @staticmethod
+    def load_excel(file_path: Union[Path, str], **kwargs):  # todo float->int ->str, FALSE -> False, '' -> None
         xlrd = __import__('xlrd')  # todo change to openpyxl
         header = kwargs.get('header', False)
         sheets = kwargs.get('sheets')
@@ -173,7 +230,8 @@ class Filez(object):
             data = get_sh_data(sh, header)
         return data
 
-    def load_xml(self, file_path, **kwargs):
+    @staticmethod
+    def load_xml(file_path: Union[Path, str], **kwargs):
         encoding = kwargs.get('encoding', 'utf-8')
         with open(file_path, encoding=encoding) as f:
             raw = f.read().strip()
@@ -181,7 +239,8 @@ class Filez(object):
         data = get_xml_children(root)
         return data
 
-    def load_html(self, file_path, **kwargs):
+    @staticmethod
+    def load_html(file_path: Union[Path, str], **kwargs):
         parser = MyHTMLParser()
         encoding = kwargs.get('encoding', 'utf-8')
         with open(file_path, encoding=encoding) as f:
@@ -189,7 +248,9 @@ class Filez(object):
         parser.feed(raw)
         return parser.data
 
-    def load(self, file_path, **kwargs):  # todo file_type='config'
+    @staticmethod
+    def load(file_path: Union[Path, str], **kwargs):  # todo file_type='config'
+        file_path = str(file_path)
         if file_path.endswith('.csv'):
             return self.load_csv(file_path, **kwargs)
         elif file_path.endswith('.json'):
@@ -197,7 +258,7 @@ class Filez(object):
         elif file_path.endswith('.yml') or file_path.endswith('.yaml'):
             return self.load_yaml(file_path, **kwargs)
         elif file_path.endswith('.conf') or file_path.endswith('.ini') or file_path.endswith('.config'):
-            return self.load_config(file_path, **kwargs)
+            return self.load_ini(file_path, **kwargs)
         elif file_path.endswith('.xls') or file_path.endswith('.xls'):
             return self.load_excel(file_path, **kwargs)
         elif file_path.endswith('.xml'):
@@ -208,5 +269,4 @@ class Filez(object):
             return self.load_txt(file_path, **kwargs)
 
 
-file = Filez()
-
+file = filez = Filez()
