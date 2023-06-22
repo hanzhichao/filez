@@ -2,6 +2,11 @@
 
 Easy use for fetch data from kinds of files
 
+![Languate - Python](https://img.shields.io/badge/language-python-blue.svg)
+![PyPI - License](https://img.shields.io/pypi/l/filez)
+![PyPI](https://img.shields.io/pypi/v/filez)
+![PyPI - Downloads](https://img.shields.io/pypi/dm/filez)
+
 ## Feature
 
 - Support load txt,csv,excel,conf/ini,json,yaml file to list or dict
