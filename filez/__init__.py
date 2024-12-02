@@ -1,7 +1,8 @@
+import re
 from collections import OrderedDict
 from xml.etree import ElementTree
 from html.parser import HTMLParser
-from configparser import ConfigParser
+from configparser import ConfigParser, NoSectionError, NoOptionError
 from typing import Union
 from pathlib import Path
 from string import Template
@@ -124,7 +125,7 @@ class CaseSensitiveiniigParser(ConfigParser):
     def get(self, section, option, *args, **kwargs):
         try:
             value = super().get(section, option, *args, **kwargs)
-        except (configparser.NoSectionError, configparser.NoOptionError):
+        except (NoSectionError, NoOptionError):
             return None
         return self.ensure_value(value)
 
@@ -164,7 +165,7 @@ class Filez(object):
             if header:
                 collections = __import__('collections')
                 data = list(map(lambda line:
-                                collections.OrderedDict({key: trans_value(value, ensure_number, ensure_boolean)
+                                dict({key: trans_value(value, ensure_number, ensure_boolean)
                                                          for key,value in line.items()}), data))
             else:
                 data = list(map(lambda line: list(map(lambda value: trans_value(value, ensure_number, ensure_boolean),
@@ -180,7 +181,7 @@ class Filez(object):
         return data
 
     @staticmethod
-    def load_yaml(**kwargs):
+    def load_yaml(file_path, **kwargs):
         yaml = __import__('yaml')
         encoding = kwargs.get('encoding', 'utf-8')
         with open(file_path, encoding=encoding) as f:
@@ -199,7 +200,7 @@ class Filez(object):
         return data
 
     @staticmethod
-    def load_excel(file_path: Union[Path, str], **kwargs):  # todo float->int ->str, FALSE -> False, '' -> None
+    def load_xls(file_path: Union[Path, str], **kwargs):  # todo float->int ->str, FALSE -> False, '' -> None
         xlrd = __import__('xlrd')  # todo change to openpyxl
         header = kwargs.get('header', False)
         sheets = kwargs.get('sheets')
@@ -211,7 +212,7 @@ class Filez(object):
             sh_data = [sh.row_values(i) for i in range(sh.nrows)]
             if header and sh_data:  # todo column name as header
                 headers = sh_data[0]
-                sh_data = [OrderedDict(zip(headers, line)) for line in sh_data[1:]]
+                sh_data = [dict(zip(headers, line)) for line in sh_data[1:]]
             return sh_data
 
         if sheets:
@@ -231,6 +232,28 @@ class Filez(object):
         return data
 
     @staticmethod
+    def load_xlsx(file_path, **kwargs) -> list:
+        openpyxl = __import__('openpyxl')
+        header = kwargs.get('header', False)
+        excel = openpyxl.load_workbook(file_path)  # 有路径应带上路径
+        # 使用指定工作表
+        sheet = excel.active
+        result = []
+        # 读取标题行
+        for row in sheet.iter_rows(max_row=1):
+            title_row = [cell.value for cell in row]
+            if header is False:
+                result.append(title_row)
+        # 读取标题行以外数据
+        for row in sheet.iter_rows(min_row=2):
+            row_data = [cell.value for cell in row]
+            if header is False:
+                result.append(row_data)
+            else:
+                result.append(dict(zip(title_row, row_data)))
+        return result
+
+    @staticmethod
     def load_xml(file_path: Union[Path, str], **kwargs):
         encoding = kwargs.get('encoding', 'utf-8')
         with open(file_path, encoding=encoding) as f:
@@ -248,6 +271,40 @@ class Filez(object):
         parser.feed(raw)
         return parser.data
 
+    @staticmethod
+    def load_properties(filepath, **kwargs):
+        with open(filepath) as f:
+            raw = f.read()
+        # 去掉注释和处理换行
+        body = re.sub(r'#.*|\\\n', '', raw)
+        data = {}
+        for line in body.split('\n'):
+            # 如果非空
+            if line:
+                key, value = line.split('=', 1)
+                # 处理多级属性，例如 a.b.c = 1
+                if '.' in key:
+                    nodes = key.split(".")
+                    cur = data
+                    for node in nodes[:-1]:
+                        if cur.get(node) is None:
+                            cur[node] = {}
+                        else:
+                            assert isinstance(cur.get(node), dict), "data format error"
+                        cur = cur[node]
+                    cur[nodes[-1]] = value
+                else:
+                    data.update({key: value})
+        return data
+
+    @staticmethod
+    def load_toml(file_path, **kwargs):
+        toml = __import__('toml')
+        import toml
+        encoding = kwargs.get('encoding', 'utf-8')
+        with open(file_path, encoding=encoding) as f:
+            return toml.load(f)
+
     def load(self, file_path: Union[Path, str], **kwargs):  # todo file_type='config'
         file_path = str(file_path)
         if file_path.endswith('.csv'):
@@ -258,12 +315,18 @@ class Filez(object):
             return self.load_yaml(file_path, **kwargs)
         elif file_path.endswith('.conf') or file_path.endswith('.ini') or file_path.endswith('.config'):
             return self.load_ini(file_path, **kwargs)
-        elif file_path.endswith('.xls') or file_path.endswith('.xls'):
-            return self.load_excel(file_path, **kwargs)
+        elif file_path.endswith('.xlsx'):
+            return self.load_xlsx(file_path, **kwargs)
+        elif file_path.endswith('.xls'):
+            return self.load_xls(file_path, **kwargs)
         elif file_path.endswith('.xml'):
             return self.load_xml(file_path, **kwargs)
         elif file_path.endswith('.html') or file_path.endswith('.htm'):
             return self.load_html(file_path, **kwargs)
+        elif file_path.endswith('.properties'):
+            return self.load_properties(file_path, **kwargs)
+        elif file_path.endswith('.toml'):
+            return self.load_toml(file_path, **kwargs)
         else:
             return self.load_txt(file_path, **kwargs)
 
