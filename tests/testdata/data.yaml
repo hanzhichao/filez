@@ -1,2 +1,17 @@
 a: 1
 b: 2
+port: ${PORT}
+debug: ${DEBUG:-true}
+msg: port is ${PORT}
+list1: &list1 [1, 2, 3]
+list2: &list2 [4, 5]
+merged_list: !merge [*list1, *list2]
+file_data: !file ./data.json
+
+created: !datetime 2025-06-01T12:30:45
+created_ms: !datetime 2025-06-01T12:30:45.123456
+ts_sec:  !datetime 1717234245
+ts_ms:   !datetime 1717234245123
+
+birth: !date 1990-01-01
+birth_ts: !date 1717234245

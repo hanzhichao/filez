@@ -1,0 +1,49 @@
+BEGIN:VCARD
+VERSION:3.0
+FN:Alice Smith
+N:Smith;Alice;;;
+NICKNAME:Al
+NID:abc-123
+BDAY:1990-01-01
+TEL;TYPE=WORK,VOICE:+86-138-0000-0000
+TEL;TYPE=HOME,VOICE:+86-010-88888888
+EMAIL;TYPE=INTERNET,WORK:alice@example.com
+EMAIL;TYPE=INTERNET,HOME:alice.home@example.com
+ORG:Example Inc.
+TITLE:Software Engineer
+URL:https://alice.example.com
+ADR;TYPE=WORK:;;123 Main St;Beijing;;100000;China
+ADR;TYPE=HOME:;;456 Park Ave;Shanghai;;200000;China
+NOTE:Test contact for demo
+X-SOCIALPROFILE;TYPE=linkedin:https://linkedin.com/in/alicesmith
+END:VCARD
+
+BEGIN:VCARD
+VERSION:3.0
+FN:Bob Jones
+N:Jones;Bob;;;
+NICKNAME:Bobby
+NID:def-456
+BDAY:1985-05-15
+TEL;TYPE=CELL,VOICE:+86-139-1111-1111
+EMAIL;TYPE=INTERNET,WORK:bob@corp.com
+ORG:Corp Ltd.
+TITLE:Product Manager
+URL:https://bob.corp.com
+ADR;TYPE=WORK:;;789 Business Rd;Shenzhen;;518000;China
+NOTE:Bob likes coffee
+X-ABLABEL:Favorites
+END:VCARD
+
+BEGIN:VCARD
+FN:Carol Lee
+N:Lee;Carol;;;
+BDAY:2000-12-31
+TEL;TYPE=CELL,VOICE:+86-137-2222-2222
+EMAIL;TYPE=INTERNET:carol@student.com
+ORG:University
+TITLE:Student
+URL:https://carol.dev
+ADR:;;321 Campus Ave;Hangzhou;;310000;China
+NOTE:New graduate
+END:VCARD

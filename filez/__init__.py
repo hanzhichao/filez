@@ -1,334 +1,234 @@
-import re
-from collections import OrderedDict
-from xml.etree import ElementTree
-from html.parser import HTMLParser
-from configparser import ConfigParser, NoSectionError, NoOptionError
-from typing import Union
-from pathlib import Path
-from string import Template
+import json
 import os
+from pathlib import Path
+from typing import Union, List
+from xml.etree import ElementTree
 
-SINGLE_TAGS = ['br','hr','img','input','param','meta','link']
+from .excel_parser import load_xls, load_xlsx
+from .json_encoder import datetime_hook, DateTimeEncoder
+from .pem_parser import parse_pem_to_dict
+from .properties_parser import parse_properties
+from .utils import cast_value
+from .vcard3_parser import parse_vcard3
+from .xml_parser import get_xml_children, parse_xml_node
 
-def trans_value(value, ensure_number=True, ensure_boolean=True):
-    if ensure_boolean is True:
-        if value.lower() in ('true', 'on'):
-            return True
-        elif value.lower() in ('false', 'off'):
-            return False
-        elif value.lower() in ('null', 'none', '~'):
-            return None
+FILE_TYPES = {
+    '.ini': 'ini',
+    '.conf': 'ini',
+    '.config': 'ini',
+    '.properties': 'properties',
+    '.json': 'json',
+    '.abi': 'json',
+    '.har': 'json',
+    '.yaml': 'yaml',
+    '.yml': 'yaml',
+    '.csv': 'csv',
+    '.tsv': 'csv',
+    '.psv': 'csv',
+    '.toml': 'toml',
+    '.htm': 'html',
+    '.html': 'html',
+    '.xml': 'xml',
+    '.xls': 'xls',
+    '.xlsx': 'xlsx',
+    '.xmind': 'xmind',
+    '.vcf': 'vcf',
+    # '.pem': 'pem',
+    # '.cert': 'pem',
+    # '.ca': 'pem',
+    # '.key': 'pem',
+}
 
-    if ensure_number is True:
-        if value.isnumeric():
-            return int(value)
-        else:
-            try:
-                return float(value)
-            except ValueError:
-                pass
-    return value
-
-def trans_dict_value(data, ensure_number=True, ensure_boolean=True, ordered_dict=False):
-    data = {key: trans_value(value, ensure_number, ensure_boolean) for key, value in data.items()}
-    if ordered_dict is True:
-        data = OrderedDict(data)
-    return data
-
-
-def get_xml_children(node):
-    children = node.getchildren()
-    if children:
-        return [{'tag': node.tag,
-                 'attrs': node.attrib,
-                 'text': node.text.strip(),
-                 'children': get_xml_children(child)
-                 } for child in children]
-    else:
-        return {'tag': node.tag,
-                'attrs': node.attrib,
-                'text': node.text or None}
-
-
-class MyHTMLParser(HTMLParser):
-    def __init__(self):
-        super().__init__()
-        self.stack = []
-        self.data = None
-
-    def handle_starttag(self, tag, attrs):
-        tag = tag.lower()
-        if tag in SINGLE_TAGS:
-            return self.handle_startendtag(tag, attrs)
-        self.stack.append(dict(tag=tag, attrs=dict(attrs), children=[], text=''))
-
-    def handle_endtag(self, tag):
-        self.data = current = self.stack.pop()
-        if self.stack:
-            parent = self.stack[-1]
-            parent['children'].append(current)
-
-    def handle_startendtag(self, tag, attrs):
-        if self.stack:
-            parent = self.stack[-1]
-            parent['children'].append(dict(tag=tag, attrs=dict(attrs), children=[], text=''))
-
-    def handle_data(self, data):
-        if not data.strip():
-            return
-        if self.stack:
-            self.stack[-1]['text'] = data.strip()
-
-
-class CaseSensitiveiniigParser(ConfigParser):
-    def optionxform(self, optionstr):
-        return optionstr
-
-    def ensure_value(self, value: str):
-        """转为value为各种类型"""
-        if value is None:
-            return value
-        # 转为整形
-        if value.isdigit():
-            return int(value)
-
-        # 转为True、False或None
-        if value.lower() in ['true', 'on']:
-            return True
-
-        if value.lower() in ['false', 'off']:
-            return False
-
-        if value.lower() in ['~', 'none', 'null']:
-            return None
-
-        # 尝试转为浮点型
-        try:
-            return float(value)
-        except:
-            pass
-
-        # 尝试解码JSON
-        json = __import__('json')
-        if value.lstrip().startswith('[') or value.lstrip().startswith('{'):
-            try:
-                return json.loads(value.replace("'", '"'))
-            except Exception as ex:
-                # print(ex)
-                pass
-        # 替换${变量}为系统环境变量值
-        if '$' in value:
-            return Template(value).safe_substitute(**dict(os.environ))
-
-        return value
-
-    def get(self, section, option, *args, **kwargs):
-        try:
-            value = super().get(section, option, *args, **kwargs)
-        except (NoSectionError, NoOptionError):
-            return None
-        return self.ensure_value(value)
-
-    def items(self, *args, **kwargs):
-        items = super().items(*args, **kwargs)
-        return [(item[0], self.ensure_value(item[1])) for item in items]
 
 class Filez(object):
+    def __init__(self):
+        self.parse_value = True  # auto cast int, float, bool, list, dict value
+        self.parse_env = True
+        self.parse_datetime = False
+        self.file_types = FILE_TYPES
+
+    @property
+    def yaml_loader(self):
+        from .yaml_loader import get_yaml_loader
+        return get_yaml_loader(self, self.parse_env, self.parse_datetime)
+
+    @property
+    def ini_parser(self):
+        from .ini_parser import IniParser
+        return IniParser
+
+    @property
+    def html_parser(self):
+        from .html_parser import HtmlParser
+        return HtmlParser
+
+    def register(self, ext: str, file_type: str):
+        self.file_types[ext] = file_type
 
     @staticmethod
-    def open(file_path: Union[Path, str], **kwargs):
-        encoding = kwargs.get('encoding', 'utf-8')
+    def open(file_path: Union[Path, str], **kwargs) -> str:
+        encoding = kwargs.pop('encoding', 'utf-8')
         with open(file_path, encoding=encoding) as f:
             raw = f.read()
         return raw
 
     @staticmethod
-    def load_txt(file_path: Union[Path, str], **kwargs):
-        encoding = kwargs.get('encoding', 'utf-8')
+    def load_txt(file_path: Union[Path, str], **kwargs) -> List[str]:
+        encoding = kwargs.pop('encoding', 'utf-8')
         with open(file_path, encoding=encoding) as f:
             data = [line.strip() for line in f.readlines()]
         return data
 
-    @staticmethod
-    def load_csv(file_path: Union[Path, str], **kwargs):
-        csv = __import__('csv')
-        encoding = kwargs.get('encoding', 'utf-8')
+    def load_csv(self, file_path: Union[Path, str], **kwargs) -> Union[List[list], List[dict]]:
+        import csv
+        encoding = kwargs.pop('encoding', 'utf-8')
         header = kwargs.get('header', False)
-        ensure_number = kwargs.get('ensure_number', True)
-        ensure_boolean = kwargs.get('ensure_boolean', True)
+        skip = kwargs.get('skip', 0)
 
         with open(file_path, encoding=encoding) as f:
             reader = csv.DictReader(f) if header else csv.reader(f)
-            data = list(reader)
+            if skip > 0:
+                for _ in range(skip):  # 消耗掉前 N 行
+                    next(reader, None)
+            if self.parse_value:
+                if header:
+                    return list(map(lambda line:
+                                    dict({key: cast_value(value)
+                                          for key, value in line.items()}), reader))
+                return list(map(lambda line: list(map(lambda value: cast_value(value),
+                                                      line)), reader))
+            return list(reader)
 
-        if ensure_number or ensure_boolean:
-            if header:
-                collections = __import__('collections')
-                data = list(map(lambda line:
-                                dict({key: trans_value(value, ensure_number, ensure_boolean)
-                                                         for key,value in line.items()}), data))
-            else:
-                data = list(map(lambda line: list(map(lambda value: trans_value(value, ensure_number, ensure_boolean),
-                                                      line)), data))
-        return data
-
-    @staticmethod
-    def load_json(file_path: Union[Path, str], **kwargs):
-        json = __import__('json')
-        encoding = kwargs.get('encoding', 'utf-8')
+    def load_json(self, file_path: Union[Path, str], **kwargs) -> Union[dict, list]:
+        encoding = kwargs.pop('encoding', 'utf-8')
+        parse_env = kwargs.pop('parse_env', self.parse_env) # todo
+        parse_datetime = kwargs.pop('parse_datetime', self.parse_datetime)
         with open(file_path, encoding=encoding) as f:
-            data = json.load(f)
-        return data
+            if parse_datetime:
+                return json.load(f, object_hook=datetime_hook, **kwargs)
+            return json.load(f, **kwargs)
 
-    @staticmethod
-    def load_yaml(file_path, **kwargs):
-        yaml = __import__('yaml')
-        encoding = kwargs.get('encoding', 'utf-8')
-        with open(file_path, encoding=encoding) as f:
-            data = yaml.safe_load(f)
-        return data
-
-    @staticmethod
-    def load_ini(file_path: Union[Path, str], **kwargs):  # todo case sensitive, sub section insure_boolean
-        configparser = __import__('configparser')
-        encoding = kwargs.get('encoding', 'utf-8')
-
-        conf = CaseSensitiveiniigParser(allow_no_value=True)
-        conf.read(file_path, encoding=encoding)
-
-        data = {section: dict(conf.items(section)) for section in conf.sections()}
-        return data
-
-    @staticmethod
-    def load_xls(file_path: Union[Path, str], **kwargs):  # todo float->int ->str, FALSE -> False, '' -> None
-        xlrd = __import__('xlrd')  # todo change to openpyxl
-        header = kwargs.get('header', False)
-        sheets = kwargs.get('sheets')
-        wb = xlrd.open_workbook(file_path)
-        all_sheets = wb.sheets()
-        if not all_sheets:
-            return
-        def get_sh_data(sh, header):
-            sh_data = [sh.row_values(i) for i in range(sh.nrows)]
-            if header and sh_data:  # todo column name as header
-                headers = sh_data[0]
-                sh_data = [dict(zip(headers, line)) for line in sh_data[1:]]
-            return sh_data
-
-        if sheets:
-            if isinstance(sheets, (list, tuple)):
-                keep_sheets = [wb.sheet_by_index(i) if isinstance(i, int) else wb.sheet_by_name(i)
-                               for i in sheets] # todo try
-            elif sheets == 'all':
-                keep_sheets = all_sheets
-            else:
-                return  # todo
-            data = {}
-            for sh in keep_sheets:
-                data[sh.name] = get_sh_data(sh, header)
+    def load_yaml(self, file_path, **kwargs) -> Union[dict, list]:
+        import yaml
+        encoding = kwargs.pop('encoding', 'utf-8')
+        if 'parse_env' in kwargs or 'parse_datetime' in kwargs:
+            parse_env = kwargs.pop('parse_env', self.parse_env)
+            parse_datetime = kwargs.pop('parse_datetime', self.parse_datetime)
+            from .yaml_loader import get_yaml_loader
+            yaml_loader = get_yaml_loader(self, parse_env, parse_datetime)
         else:
-            sh = all_sheets[0]
-            data = get_sh_data(sh, header)
+            yaml_loader = self.yaml_loader
+
+        with open(file_path, encoding=encoding) as f:
+            data = yaml.load(f, Loader=yaml_loader)
+        return data
+
+    def load_ini(self, file_path: Union[Path, str], **kwargs) -> dict:
+        encoding = kwargs.pop('encoding', 'utf-8')
+        parse_value = kwargs.pop('parse_value', self.parse_value)
+        parse_env = kwargs.pop('parse_env', self.parse_env)
+        parse_datetime = kwargs.pop('parse_datetime', self.parse_datetime)
+        cfg = self.ini_parser(parse_value=parse_value, parse_env=parse_env, parse_datetime=parse_datetime, **kwargs)
+        cfg.read(file_path, encoding=encoding)
+        data = cfg.items_dict()
+        return data
+
+    @staticmethod
+    def load_xls(file_path: Union[Path, str], **kwargs) -> dict:
+        header = kwargs.get('header', False)
+        skip = kwargs.get('skip', 0)
+        sheets = kwargs.get('sheets', None)
+        data = load_xls(file_path, header=header, skip=skip, sheets=sheets)
         return data
 
     @staticmethod
     def load_xlsx(file_path, **kwargs) -> list:
-        openpyxl = __import__('openpyxl')
         header = kwargs.get('header', False)
-        excel = openpyxl.load_workbook(file_path)  # 有路径应带上路径
-        # 使用指定工作表
-        sheet = excel.active
-        result = []
-        # 读取标题行
-        for row in sheet.iter_rows(max_row=1):
-            title_row = [cell.value for cell in row]
-            if header is False:
-                result.append(title_row)
-        # 读取标题行以外数据
-        for row in sheet.iter_rows(min_row=2):
-            row_data = [cell.value for cell in row]
-            if header is False:
-                result.append(row_data)
-            else:
-                result.append(dict(zip(title_row, row_data)))
-        return result
+        skip = kwargs.get('skip', 0)
+        sheets = kwargs.get('sheets', None)
+        data = load_xlsx(file_path, header=header, skip=skip, sheets=sheets)
+        return data
 
-    @staticmethod
-    def load_xml(file_path: Union[Path, str], **kwargs):
-        encoding = kwargs.get('encoding', 'utf-8')
-        with open(file_path, encoding=encoding) as f:
-            raw = f.read().strip()
+    def load_xml(self, file_path: Union[Path, str], **kwargs) -> dict:
+        raw = self.open(file_path, **kwargs)
         root = ElementTree.fromstring(raw)
-        data = get_xml_children(root)
+        data = parse_xml_node(root, **kwargs)
         return data
 
-    @staticmethod
-    def load_html(file_path: Union[Path, str], **kwargs):
-        parser = MyHTMLParser()
-        encoding = kwargs.get('encoding', 'utf-8')
-        with open(file_path, encoding=encoding) as f:
-            raw = f.read().strip()
+    def load_html(self, file_path: Union[Path, str], **kwargs) -> dict:
+        raw = self.open(file_path, **kwargs)
+        parser = self.html_parser()
         parser.feed(raw)
-        return parser.data
+        root = parser.data['children']
+        head, body = {}, {}
+        for item in root:
+            if item['tag'] == 'head':
+                head = item['children']
+            elif item['tag']  == 'body':
+                body = item['children']
+        return {'head': head, 'body': body}
 
-    @staticmethod
-    def load_properties(filepath, **kwargs):
-        with open(filepath) as f:
-            raw = f.read()
-        # 去掉注释和处理换行
-        body = re.sub(r'#.*|\\\n', '', raw)
-        data = {}
-        for line in body.split('\n'):
-            # 如果非空
-            if line:
-                key, value = line.split('=', 1)
-                # 处理多级属性，例如 a.b.c = 1
-                if '.' in key:
-                    nodes = key.split(".")
-                    cur = data
-                    for node in nodes[:-1]:
-                        if cur.get(node) is None:
-                            cur[node] = {}
-                        else:
-                            assert isinstance(cur.get(node), dict), "data format error"
-                        cur = cur[node]
-                    cur[nodes[-1]] = value
-                else:
-                    data.update({key: value})
+    def load_properties(self, file_path, **kwargs) -> dict:
+        raw = self.open(file_path, **kwargs)
+        data = parse_properties(raw)
         return data
 
     @staticmethod
-    def load_toml(file_path, **kwargs):
+    def load_toml(file_path, **kwargs) -> Union[dict, list]:
         toml = __import__('toml')
-        import toml
-        encoding = kwargs.get('encoding', 'utf-8')
+        encoding = kwargs.pop('encoding', 'utf-8')
         with open(file_path, encoding=encoding) as f:
             return toml.load(f)
 
-    def load(self, file_path: Union[Path, str], **kwargs):  # todo file_type='config'
+    def load_pem(self, file_path, **kwargs) -> dict:
+        raw = self.open(file_path, **kwargs)
+        data = parse_pem_to_dict(raw)
+        return data
+
+    def load(self, file_path: Union[Path, str], **kwargs) -> Union[dict, list]:  # todo file_type='config'
         file_path = str(file_path)
-        if file_path.endswith('.csv'):
-            return self.load_csv(file_path, **kwargs)
-        elif file_path.endswith('.json'):
-            return self.load_json(file_path, **kwargs)
-        elif file_path.endswith('.yml') or file_path.endswith('.yaml'):
-            return self.load_yaml(file_path, **kwargs)
-        elif file_path.endswith('.conf') or file_path.endswith('.ini') or file_path.endswith('.config'):
-            return self.load_ini(file_path, **kwargs)
-        elif file_path.endswith('.xlsx'):
-            return self.load_xlsx(file_path, **kwargs)
-        elif file_path.endswith('.xls'):
-            return self.load_xls(file_path, **kwargs)
-        elif file_path.endswith('.xml'):
-            return self.load_xml(file_path, **kwargs)
-        elif file_path.endswith('.html') or file_path.endswith('.htm'):
-            return self.load_html(file_path, **kwargs)
-        elif file_path.endswith('.properties'):
-            return self.load_properties(file_path, **kwargs)
-        elif file_path.endswith('.toml'):
-            return self.load_toml(file_path, **kwargs)
-        else:
-            return self.load_txt(file_path, **kwargs)
+        _, ext = os.path.splitext(file_path)
+        file_type = self.file_types.get(ext, 'txt')
+        load_method = getattr(self, f'load_{file_type}')
+        return load_method(file_path, **kwargs)
+
+    def load_xmind(self, file_path, **kwargs):
+        from xmindparser import xmind_to_dict
+        data = xmind_to_dict(file_path)[0]
+        return data
+
+    def load_vcf(self, file_path, **kwargs):
+        raw = self.open(file_path, **kwargs)
+        data = parse_vcard3(raw)
+        return data
+
+    @staticmethod
+    def save_json(data: Union[dict, list], file_path: Union[Path, str], **kwargs):
+        with open(file_path, 'w') as f:
+            json.dump(data, f, cls=DateTimeEncoder, **kwargs)
+
+    @staticmethod
+    def save_yaml(data: Union[dict, list], file_path: Union[Path, str]):
+        yaml = __import__('yaml')
+        with open(file_path, 'w') as f:
+            yaml.safe_dump(data, f)
+
+    @staticmethod
+    def save_toml(data: Union[dict, list], file_path: Union[Path, str]):
+        toml = __import__('toml')
+        with open(file_path, 'w') as f:
+            toml.dump(data, f)
+
+    def convert(self, input_file_path: Union[Path, str], output_file_path: Union[Path, str], **kwargs):
+        data = self.load(input_file_path, **kwargs)
+        output_file_path = str(output_file_path)
+        if output_file_path.endswith('.json'):
+            return self.save_json(data, output_file_path)
+        if output_file_path.endswith('.yml') or output_file_path.endswith('.yaml'):
+            return self.save_yaml(data, output_file_path)
+        if output_file_path.endswith('.toml'):
+            return self.save_toml(data, output_file_path)
+        raise Exception('Output file format not support, only support json,yaml,toml')
 
 
 file = filez = Filez()
