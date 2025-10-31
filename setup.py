@@ -6,7 +6,7 @@ from setuptools import setup, find_packages
 
 this_directory = os.path.abspath(os.path.dirname(__file__))
 setup_requirements = []
-version = '0.14'
+version = '0.15'
 
 def read_file(filename):
     with open(os.path.join(this_directory, filename), encoding='utf-8') as f:
